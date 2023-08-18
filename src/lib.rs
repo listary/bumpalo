@@ -293,6 +293,7 @@ pub struct Bump {
     // The current chunk we are bump allocating within.
     current_chunk_footer: Cell<NonNull<ChunkFooter>>,
     allocation_limit: Cell<Option<usize>>,
+    max_new_chunk_size: Cell<Option<usize>>,
 }
 
 #[repr(C)]
@@ -523,6 +524,7 @@ impl Bump {
             return Ok(Bump {
                 current_chunk_footer: Cell::new(EMPTY_CHUNK.get()),
                 allocation_limit: Cell::new(None),
+                max_new_chunk_size: Cell::new(None),
             });
         }
 
@@ -540,6 +542,7 @@ impl Bump {
         Ok(Bump {
             current_chunk_footer: Cell::new(chunk_footer),
             allocation_limit: Cell::new(None),
+            max_new_chunk_size: Cell::new(None),
         })
     }
 
@@ -581,6 +584,11 @@ impl Bump {
     /// ```
     pub fn set_allocation_limit(&self, limit: Option<usize>) {
         self.allocation_limit.set(limit)
+    }
+
+    /// The maximum size in bytes of a new chunk allocation.
+    pub fn set_max_new_chunk_size(&self, max_new_chunk_size: Option<usize>) {
+        self.max_new_chunk_size.set(max_new_chunk_size)
     }
 
     /// How much headroom an arena has before it hits its allocation
@@ -1478,7 +1486,8 @@ impl Bump {
             let min_new_chunk_size = layout.size().max(DEFAULT_CHUNK_SIZE_WITHOUT_FOOTER);
             let mut base_size = (current_layout.size() - FOOTER_SIZE)
                 .checked_mul(2)?
-                .max(min_new_chunk_size);
+                .max(min_new_chunk_size)
+                .min(self.max_new_chunk_size.get().unwrap_or(usize::MAX));
             let chunk_memory_details = iter::from_fn(|| {
                 let bypass_min_chunk_size_for_small_limits = matches!(self.allocation_limit(), Some(limit) if layout.size() < limit
                             && base_size >= layout.size()
